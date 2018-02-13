@@ -1,7 +1,7 @@
 /*
 ** Copyright (C) 2014 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2010-2013 Sourcefire, Inc.
-** Author: Michael R. Altizer <mialtize@cisco.com>
+** Author: Michael R. Altizer <maltizer@sourcefire.com>
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License Version 2 as
@@ -47,6 +47,14 @@ struct _daq_module
     int (*initialize) (const DAQ_Config_t *config, void **ctxt_ptr, char *errbuf, size_t len);
     /* Set the module's BPF based on the given string */
     int (*set_filter) (void *handle, const char *filter);
+    int (*rsp_pc_filter) (void *handle, const void *sf_data, int datalen,
+            DAQ_Set_SF_Config sfconf_cb, daq_sf_req_type *targ_type);
+    int (*req_pc_filter) (void *handle, void *dst_data, daq_sf_req_type req_type);
+    int (*sf_get_mbuf) (void *handle, void **mbuf);
+    int (*sf_put_mbuf) (void *handle, void *mbuf, uint8_t pool_idx);
+    int (*sf_get_mbufs) (void *handle, void *mbufs, uint8_t pool_idx);
+    int (*sf_send_mbuf) (void *handle, void *mbuf, uint8_t ring_idx, uint8_t pool_idx);
+    void *(*dp_rte_memcpy) (void *mbuf_dst, const void *mbuf_src, uint32_t buf_len);
     /* Complete device opening and begin queuing packets if they have not been already. */
     int (*start) (void *handle);
     /* Acquire up to <cnt> packets and call <callback> for each with <user> as the final argument.
@@ -58,6 +66,7 @@ struct _daq_module
     int (*inject) (void *handle, const DAQ_PktHdr_t *hdr, const uint8_t *packet_data, uint32_t len, int reverse);
     /* Force breaking out of the acquisition loop after the current iteration. */
     int (*breakloop) (void *handle);
+    int (*breakloop_ext) (void);
     /* Stop queuing packets, if possible */
     int (*stop) (void *handle);
     /* Close the device and clean up */
@@ -81,7 +90,7 @@ struct _daq_module
     /* Return the index of the given named device if possible. */
     int (*get_device_index) (void *handle, const char *device);
     /* Modify a flow */
-    int (*modify_flow) (void *handle, const DAQ_PktHdr_t *hdr, const DAQ_ModFlow_t *modify);
+    int (*modify_flow) (void *handle, const DAQ_PktHdr_t *hdr, DAQ_ModFlow_t *modify);
     /* Read new configuration */
     int (*hup_prep) (void *handle, void **new_config);
     /* Swap new and old configuration */
@@ -94,16 +103,12 @@ struct _daq_module
      * @param [in] hdr         DAQ packet header of the control channel packet.
      * @param [in] dp_key      Key structure of the data channel flow
      * @param [in] packet_data Packet of the companion control channel packet.
-     * @param [in] params      Parameters to control the PST/EFT entry.
      * @return                 Error code of the API. 0 - success.
      */
-    int (*dp_add_dc) (void *handle, const DAQ_PktHdr_t *hdr, DAQ_DP_key_t *dp_key,
-                      const uint8_t *packet_data, DAQ_Data_Channel_Params_t *params);
-    /* Query a flow */
-    int (*query_flow) (void *handle, const DAQ_PktHdr_t *hdr, DAQ_QueryFlow_t *query);
+     int (*dp_add_dc) (void *handle, const DAQ_PktHdr_t * hdr, DAQ_DP_key_t * dp_key, const uint8_t * packet_data);
 };
 
-#define DAQ_API_VERSION    0x00010006
+#define DAQ_API_VERSION    0x00010002
 
 #define DAQ_ERRBUF_SIZE 256
 /* This is a convenience macro for safely printing to DAQ error buffers.  It must be called on a known-size character array. */

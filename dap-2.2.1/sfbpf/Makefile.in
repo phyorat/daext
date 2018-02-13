@@ -83,7 +83,7 @@ subdir = sfbpf
 DIST_COMMON = $(srcdir)/Makefile.in $(srcdir)/Makefile.am \
 	$(top_srcdir)/depcomp $(include_HEADERS)
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
-am__aclocal_m4_deps = $(top_srcdir)/m4/ax_check_compile_flag.m4 \
+am__aclocal_m4_deps = $(top_srcdir)/m4/ax_cflags_gcc_option.m4 \
 	$(top_srcdir)/m4/libtool.m4 $(top_srcdir)/m4/ltoptions.m4 \
 	$(top_srcdir)/m4/ltsugar.m4 $(top_srcdir)/m4/ltversion.m4 \
 	$(top_srcdir)/m4/lt~obsolete.m4 $(top_srcdir)/m4/sf.m4 \
@@ -203,7 +203,6 @@ CTAGS = ctags
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 ACLOCAL = @ACLOCAL@
 AMTAR = @AMTAR@
-AM_CFLAGS = @AM_CFLAGS@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AR = @AR@
 AUTOCONF = @AUTOCONF@
@@ -216,9 +215,6 @@ CFLAGS = @CFLAGS@
 CPP = @CPP@
 CPPFLAGS = @CPPFLAGS@
 CYGPATH_W = @CYGPATH_W@
-DAQ_MAJOR_VERSION = @DAQ_MAJOR_VERSION@
-DAQ_MINOR_VERSION = @DAQ_MINOR_VERSION@
-DAQ_PATCH_VERSION = @DAQ_PATCH_VERSION@
 DEFS = @DEFS@
 DEPDIR = @DEPDIR@
 DLLTOOL = @DLLTOOL@
@@ -362,7 +358,7 @@ sfbpf-int.c \
 runlex.sh
 
 nodist_libsfbpf_la_SOURCES = sf_grammar.c sf_scanner.c tokdefs.h
-libsfbpf_la_CFLAGS = $(AM_CFLAGS) -Dyylval=sfbpf_lval
+libsfbpf_la_CFLAGS = -Dyylval=sfbpf_lval
 libsfbpf_la_LDFLAGS = -version-info 0:1:0 @XCCFLAGS@
 CLEANFILES = sf_scanner.c sf_grammar.c tokdefs.h sf_scanner.h
 all: all-am

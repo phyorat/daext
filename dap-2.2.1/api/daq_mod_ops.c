@@ -1,6 +1,7 @@
-/* Copyright (C) 2014 Cisco and/or its affiliates. All rights reserved.
+/*
+** Copyright (C) 2014 Cisco and/or its affiliates. All rights reserved.
 ** Copyright (C) 2010-2013 Sourcefire, Inc.
-** Author: Michael R. Altizer <mialtize@cisco.com>
+** Author: Michael R. Altizer <maltizer@sourcefire.com>
 **
 ** This program is free software; you can redistribute it and/or modify
 ** it under the terms of the GNU General Public License Version 2 as
@@ -77,6 +78,88 @@ DAQ_LINKAGE int daq_set_filter(const DAQ_Module_t *module, void *handle, const c
     }
 
     return module->set_filter(handle, filter);
+}
+
+DAQ_LINKAGE int daq_sf_ipc_rsp(const DAQ_Module_t *module, void *handle,
+        const void *sf_data, int datalen, DAQ_Set_SF_Config sfconf_cb, daq_sf_req_type *targ_type)
+{
+    if (!module)
+        return DAQ_SUCCESS;
+
+    if (!handle)
+        return DAQ_SUCCESS;
+
+    return module->rsp_pc_filter(handle, sf_data, datalen, sfconf_cb, targ_type);
+}
+
+DAQ_LINKAGE int daq_sf_ipc_req(const DAQ_Module_t *module, void *handle,
+        void *dst_data, daq_sf_req_type req_type)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->req_pc_filter(handle, dst_data, req_type);
+}
+
+DAQ_LINKAGE int daq_sf_get_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void **mbuf)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_get_mbuf(handle, mbuf);
+}
+
+DAQ_LINKAGE int daq_sf_put_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void *mbuf, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_put_mbuf(handle, mbuf, pool_idx);
+}
+
+DAQ_LINKAGE int daq_sf_get_mbufs(const DAQ_Module_t *module,
+        void *handle,
+        void *mbufs, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_get_mbufs(handle, mbufs, pool_idx);
+}
+
+DAQ_LINKAGE int daq_sf_send_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void *mbuf, uint8_t ring_idx, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_send_mbuf(handle, mbuf, ring_idx, pool_idx);
+}
+
+DAQ_LINKAGE void *daq_rte_memcpy(const DAQ_Module_t *module,
+        void *mbuf_dst, const void *mbuf_src, uint32_t buf_len)
+{
+    return (void*)((module->dp_rte_memcpy)(mbuf_dst, mbuf_src, buf_len));
 }
 
 DAQ_LINKAGE int daq_start(const DAQ_Module_t *module, void *handle)
@@ -165,6 +248,14 @@ DAQ_LINKAGE int daq_breakloop(const DAQ_Module_t *module, void *handle)
         return DAQ_ERROR_NOCTX;
 
     return module->breakloop(handle);
+}
+
+DAQ_LINKAGE int daq_breakloop_ext(const DAQ_Module_t *module)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    return module->breakloop_ext();
 }
 
 DAQ_LINKAGE int daq_stop(const DAQ_Module_t *module, void *handle)
@@ -339,7 +430,7 @@ DAQ_LINKAGE int daq_hup_post(const DAQ_Module_t *module, void *handle, void *old
     return module->hup_post(handle, old_config);
 }
 
-DAQ_LINKAGE int daq_modify_flow(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, const DAQ_ModFlow_t *modify)
+DAQ_LINKAGE int daq_modify_flow(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, DAQ_ModFlow_t *modify)
 {
     if (!module)
         return DAQ_ERROR_NOMOD;
@@ -348,17 +439,6 @@ DAQ_LINKAGE int daq_modify_flow(const DAQ_Module_t *module, void *handle, const 
         return DAQ_SUCCESS;
 
     return module->modify_flow(handle, hdr, modify);
-}
-
-DAQ_LINKAGE int daq_query_flow(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, DAQ_QueryFlow_t *query)
-{
-    if (!module)
-        return DAQ_ERROR_NOMOD;
-
-    if (!module->query_flow)
-        return DAQ_SUCCESS;
-
-    return module->query_flow(handle, hdr, query);
 }
 
 /*
@@ -380,8 +460,7 @@ DAQ_LINKAGE uint32_t daq_get_type(const DAQ_Module_t *module)
     return module->type;
 }
 
-DAQ_LINKAGE int daq_dp_add_dc(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr,
-                              DAQ_DP_key_t *dp_key, const uint8_t *packet_data, DAQ_Data_Channel_Params_t *params)
+DAQ_LINKAGE int daq_dp_add_dc(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, DAQ_DP_key_t *dp_key, const uint8_t *packet_data)
 {
     if (!module)
         return DAQ_ERROR_NOMOD;
@@ -392,5 +471,5 @@ DAQ_LINKAGE int daq_dp_add_dc(const DAQ_Module_t *module, void *handle, const DA
     if (!module->dp_add_dc)
         return DAQ_SUCCESS;
 
-    return module->dp_add_dc(handle, hdr, dp_key, packet_data, params);
+    return module->dp_add_dc(handle, hdr, dp_key, packet_data);
 }
