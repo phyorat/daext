@@ -80,6 +80,88 @@ DAQ_LINKAGE int daq_set_filter(const DAQ_Module_t *module, void *handle, const c
     return module->set_filter(handle, filter);
 }
 
+DAQ_LINKAGE int daq_sf_ipc_rsp(const DAQ_Module_t *module, void *handle,
+        const void *sf_data, int datalen, DAQ_Set_SF_Config sfconf_cb, daq_sf_req_type *targ_type)
+{
+    if (!module)
+        return DAQ_SUCCESS;
+
+    if (!handle)
+        return DAQ_SUCCESS;
+
+    return module->rsp_pc_filter(handle, sf_data, datalen, sfconf_cb, targ_type);
+}
+
+DAQ_LINKAGE int daq_sf_ipc_req(const DAQ_Module_t *module, void *handle,
+        void *dst_data, daq_sf_req_type req_type)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->req_pc_filter(handle, dst_data, req_type);
+}
+
+DAQ_LINKAGE int daq_sf_get_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void **mbuf)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_get_mbuf(handle, mbuf);
+}
+
+DAQ_LINKAGE int daq_sf_put_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void *mbuf, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_put_mbuf(handle, mbuf, pool_idx);
+}
+
+DAQ_LINKAGE int daq_sf_get_mbufs(const DAQ_Module_t *module,
+        void *handle,
+        void *mbufs, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_get_mbufs(handle, mbufs, pool_idx);
+}
+
+DAQ_LINKAGE int daq_sf_send_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void *mbuf, uint8_t ring_idx, uint8_t pool_idx)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_send_mbuf(handle, mbuf, ring_idx, pool_idx);
+}
+
+DAQ_LINKAGE void *daq_rte_memcpy(const DAQ_Module_t *module,
+        void *mbuf_dst, const void *mbuf_src, uint32_t buf_len)
+{
+    return (void*)((module->dp_rte_memcpy)(mbuf_dst, mbuf_src, buf_len));
+}
+
 DAQ_LINKAGE int daq_start(const DAQ_Module_t *module, void *handle)
 {
     if (!module)
@@ -166,6 +248,14 @@ DAQ_LINKAGE int daq_breakloop(const DAQ_Module_t *module, void *handle)
         return DAQ_ERROR_NOCTX;
 
     return module->breakloop(handle);
+}
+
+DAQ_LINKAGE int daq_breakloop_ext(const DAQ_Module_t *module)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    return module->breakloop_ext();
 }
 
 DAQ_LINKAGE int daq_stop(const DAQ_Module_t *module, void *handle)

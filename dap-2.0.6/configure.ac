@@ -102,6 +102,14 @@ if test "x$with_netmap_includes" != "xno"; then
     CPPFLAGS="${CPPFLAGS} -I${with_netmap_includes}"
 fi
 
+AC_ARG_WITH(species_includes,
+            [  --with-species-includes=DIR    species include directory],
+            [with_species_includes="$withval"], [with_species_includes="no"])
+
+if test "x$with_species_includes" != "xno"; then
+    CPPFLAGS="${CPPFLAGS} -I${with_species_includes}"
+fi
+
 AC_ARG_WITH(dpdk_includes,
             [  --with-dpdk-includes=DIR    dpdk include directory],
             [with_dpdk_includes="$withval"], [with_dpdk_includes="no"])

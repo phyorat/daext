@@ -856,14 +856,14 @@ send_packet:
                 if (verdict == DAQ_VERDICT_PASS && instance->peer)
                 {
                     AFPacketEntry *entry = instance->peer->tx_ring.cursor;
-                    int rc;
+                    //int rc;
 
                     if (entry->hdr.h2->tp_status == TP_STATUS_AVAILABLE)
                     {
                         memcpy(entry->hdr.raw + TPACKET_ALIGN(instance->peer->tp_hdrlen), data, tp_snaplen);
                         entry->hdr.h2->tp_len = tp_snaplen;
                         entry->hdr.h2->tp_status = TP_STATUS_SEND_REQUEST;
-                        rc = send(instance->peer->fd, NULL, 0, 0);
+                        /*rc = */send(instance->peer->fd, NULL, 0, 0);
                         instance->peer->tx_ring.cursor = entry->next;
                     }
                     /* Else, don't forward the packet... */

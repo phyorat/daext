@@ -32,6 +32,8 @@
 #include <windows.h>
 #endif
 
+#include "daq_gen.h"
+
 #ifndef DAQ_SO_PUBLIC
 #if defined _WIN32 || defined __CYGWIN__
 #  if defined DAQ_DLL
@@ -69,6 +71,9 @@
 # define DAQ_LINKAGE DAQ_SO_PUBLIC
 #endif
 
+#define DAQ_USER_SF_OP_NONE  3  /* SF Operation Empty */
+#define DAQ_USER_INT_EXIT	 2  /* Daq interrupted by user */
+#define DAQ_HALF_EXIT		 1  /* Daq Initialize interrupted by user */
 #define DAQ_SUCCESS          0  /* Success! */
 #define DAQ_ERROR           -1  /* Generic error */
 #define DAQ_ERROR_NOMEM     -2  /* Out of memory error */
@@ -99,6 +104,7 @@
 typedef struct _daq_pkthdr
 {
     struct timeval ts;      /* Timestamp */
+    time_t cts;
     uint32_t caplen;        /* Length of the portion present */
     uint32_t pktlen;        /* Length of this packet (off wire) */
     int32_t ingress_index;  /* Index of the inbound interface. */
@@ -189,8 +195,161 @@ typedef enum {
     MAX_DAQ_VERDICT
 } DAQ_Verdict;
 
+typedef struct __xstatsinfo
+{
+    uint8_t cIfup;
+    uint32_t link_speed;
+    uint64_t uRxPrcnt;
+    uint64_t uRxPrbyte;
+    uint64_t uTxPrcnt;
+    uint64_t uTxPrbyte;
+} xstatsinfo;
+
 typedef DAQ_Verdict (*DAQ_Analysis_Func_t)(void *user, const DAQ_PktHdr_t *hdr, const uint8_t *data);
 typedef int (*DAQ_Meta_Func_t)(void *user, const DAQ_MetaHdr_t *hdr, const uint8_t *data);
+typedef int (*DAQ_Set_SF_Config)(void *args);
+typedef int (*DAQ_SF_Init_Func_t)(void *mbuf_cfl, uint16_t rsock, uint16_t nsock);
+typedef int (*DAQ_SF_Merge_Func_t)(void *mbuf_cfl, void *mbuf, unsigned sock_id, uint8_t dp_type, uint8_t db_sync);
+typedef int (*DAQ_SF_Init_SSN_Func_t)(void);
+typedef int (*DAQ_SF_Cfl_SSN_Func_t)(void *mbuf_cfl);
+typedef int (*DAQ_SF_Cfl_DBIns_Func_t)(void *mbuf_cfl);
+typedef int (*DAQ_SP_Init_Func_t)(void);
+typedef int (*DAQ_SP_Scale_Func_t)(xstatsinfo *xtinfo, uint8_t pid);
+
+//StatsFlow DataPlane struct
+typedef struct __DataplaneAddrs
+{
+    int sock_id;
+    void *dp_main;
+    void *dp_extra;
+} DataplaneAddrs;
+
+/* daq_dpdk_mbuf_ring collections ****************************/
+typedef enum _SUR_DAQ_MBUF_TYPE
+{
+    MPOOL_STATSFLOW = 0,
+    MPOOL_SF_STACK,
+    MPOOL_SF_SSN,
+    MPOOL_SF_CFL_IPT_HA,
+    MPOOL_SF_CFL_IPTET,
+    MPOOL_SF_CFL_PP_HA,
+    MPOOL_SF_CFL_PROTP,
+    MPOOL_SF_CFL,
+    MPOOL_SF_PPL,   /*packet pay load*/
+    MPOOL_DETECT_MCH,
+    MPOOL_META,
+    MPOOL_META_PAYLOAD,
+    MPOOL_DIGGER,
+    MPOOL_PORT_BITMAP,
+    MPOOL_MATCHED_PKT,
+    MPOOL_GEO,
+    MPOOL_AP_MSG,
+    MPOOL_AP_SQ_OP,//Squirrel Output
+    AP_MPOOL_COUNT
+} AP_DAQ_MPOOL_TYPE;
+
+typedef enum _SUR_DAQ_RING_TYPE
+{
+    RING_STATSFLOW = 0,
+    RING_SF_STACK,
+    //RING_SF_ALY,
+    RING_META,
+    RING_META_PAYLOAD,
+    RING_DIGGER,
+    RING_MSG_MASTER,        //ap->master(daq)
+    RING_AP_MSG_DG,         //master->digger
+    RING_AP_MSG_SQ,         //master->squirrel
+    RING_AP_MSG_PT,         //master->portrait
+    RING_AP_SQ_OP,          //squirrel->portrait
+    RING_AP_SQ_OP_RET,      //portrait->quirrel
+    AP_RING_COUNT
+} AP_DAQ_RING_TYPE;
+
+typedef enum __DAQ_MBUF_ATTRIBUTE
+{
+    MR_SINGLETON = 0,
+    MR_PRIMARY_ONLY,
+//    MPOOL_SECONDARY_ONLY,
+    MR_ALL_QUEUES,
+    MR_GENERAL,
+    MR_PRIMARY_NUMA_NODES,
+} DAQ_MPOOL_RING_ATTRIBUTE;
+/*
+typedef enum __DAQ_RING_ATTRIBUTE
+{
+    RING_SINGLETON,
+    RING_PRIMARY_ONLY,
+    RING_SECONDARY_ONLY,
+    RING_ALL_QUEUES,
+    RING_GENERAL,
+} DAQ_RING_ATTRIBUTE;*/
+
+typedef struct __daq_dpdk_mbuf_collect
+{
+    uint8_t type;
+    uint8_t attri;
+    char name[62];
+    uint32_t poolsize;
+    uint32_t datalen;
+    uint32_t poolcache;
+    uint32_t private_dlen;      //mostly "0"
+    uint64_t flag_rein;
+    uint64_t pool_sche;
+} daq_dpdk_mpool_collect;
+
+typedef struct __daq_dpdk_ring_collect
+{
+    uint8_t type;
+    uint8_t attri;
+    char name[62];
+    uint32_t queue_size;
+    unsigned flags;
+    uint64_t flag_sp;
+} daq_dpdk_ring_collect;
+
+#define MINV_MAX_MPOOL_CNT      16
+#define MINV_MAX_RING_CNT      16
+typedef struct __mn_dpl_config
+{
+    uint16_t npool;
+    uint16_t nring;
+    daq_dpdk_mpool_collect mpools[MINV_MAX_MPOOL_CNT];
+    daq_dpdk_ring_collect rings[MINV_MAX_RING_CNT];
+} mn_dpl_config;
+
+//StatsFlow DataPlane Load Info
+#define DAQ_CFL_LT_SERVICE_NUM      4   //CFL;SSN;DB-INS;STACK-PROTO-SCALE
+typedef struct __DataplaneLoadInfo
+{
+    uint16_t rsock;
+    uint16_t nsock;
+    uint16_t npool;
+    uint16_t nring;
+    char *ap_name;
+    daq_dpdk_mpool_collect *mpools;
+    daq_dpdk_ring_collect *rings;
+    DAQ_SF_Init_Func_t sf_init;
+    DAQ_SF_Merge_Func_t sf_confluence;
+    DAQ_SF_Init_SSN_Func_t sf_ssn_init;
+    DAQ_SF_Cfl_SSN_Func_t sf_cfl_ssn;
+    DAQ_SF_Cfl_DBIns_Func_t sf_cfl_dbins;   /*database inspection*/
+    DAQ_SP_Init_Func_t sp_init;
+    DAQ_SP_Scale_Func_t sp_scale;
+} ApDpLoadInfo;
+
+typedef enum __daq_sf_req_type
+{
+    DAQ_SF_DP_SWAP = 0,
+    DAQ_SF_DP_SWAP_RTN,
+    DAQ_SF_STACK_DP_SWAP,
+    DAQ_SF_STACK_DP_SWAP_RTN,
+    DAQ_SF_SET_CONFIG,
+    DAQ_SF_SET_CONFIG_RTN,
+    DAQ_SF_DIST_DP,
+    DAQ_SF_SSN_ANALYST,
+    DAQ_SF_REQ_INVALID,
+    DAQ_SF_REQ_INVALID_RTN
+} daq_sf_req_type;
 
 typedef enum {
     DAQ_MODE_PASSIVE,
@@ -199,7 +358,19 @@ typedef enum {
     MAX_DAQ_MODE
 } DAQ_Mode;
 
+#define DAQ_FILTER_CONFIG_DATA_SIZE      128
+
+typedef struct __DAQ_Filter_Config
+{
+    uint32_t uOperation; //Operation as defined in module.h
+    uint32_t config_size;
+    char content[DAQ_FILTER_CONFIG_DATA_SIZE];
+}DAQ_Filter_Config;
+
 #define DAQ_CFG_PROMISC     0x01
+#define DAQ_CFG_DAEMON      0x02
+#define DAQ_CFG_SYSLOG      0x04
+#define DAQ_CFG_MINERVA     0x08
 
 typedef struct _daq_dict_entry DAQ_Dict;
 
@@ -210,8 +381,10 @@ typedef struct _daq_config
     unsigned timeout;   /* Read timeout for acquire loop in milliseconds (0 = unlimited) */
     DAQ_Mode mode;      /* Module mode (DAQ_MODE_*) */
     uint32_t flags;     /* Other configuration flags (DAQ_CFG_*) */
+    uint64_t lcore_utl_flag;    /*App's lcore utilization*/
     DAQ_Dict *values;   /* Dictionary of arbitrary key[:value] string pairs. */
     char *extra;        /* Miscellaneous configuration data to be passed to the DAQ module */
+    ApDpLoadInfo *ap_dpl;	/* stats_flow data-plane load info */
 } DAQ_Config_t;
 
 typedef enum {

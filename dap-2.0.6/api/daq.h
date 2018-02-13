@@ -61,6 +61,21 @@ DAQ_LINKAGE uint32_t daq_get_type(const DAQ_Module_t *module);
 /* DAQ Module Instance functions */
 DAQ_LINKAGE int daq_initialize(const DAQ_Module_t *module, const DAQ_Config_t *config, void **handle, char *errbuf, size_t len);
 DAQ_LINKAGE int daq_set_filter(const DAQ_Module_t *module, void *handle, const char *filter);
+DAQ_LINKAGE int daq_sf_ipc_rsp(const DAQ_Module_t *, void *, const void *, int, DAQ_Set_SF_Config, daq_sf_req_type *);
+DAQ_LINKAGE int daq_sf_ipc_req(const DAQ_Module_t *, void *, void *, daq_sf_req_type);
+DAQ_LINKAGE int daq_sf_get_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void **mbuf);
+DAQ_LINKAGE int daq_sf_put_mbuf(const DAQ_Module_t *module,
+        void *handle,
+        void *mbuf, uint8_t pool_idx);
+DAQ_LINKAGE int daq_sf_get_mbufs(const DAQ_Module_t *module,
+        void *handle,
+        void *mbufs, uint8_t pool_idx);
+DAQ_LINKAGE int daq_sf_send_mbuf(const DAQ_Module_t *module,
+        void *handle, void *mbuf, uint8_t ring_idx, uint8_t pool_idx);
+DAQ_LINKAGE void *daq_rte_memcpy(const DAQ_Module_t *module,
+        void *mbuf_dst, const void *mbuf_src, uint32_t buf_len);
 DAQ_LINKAGE int daq_start(const DAQ_Module_t *module, void *handle);
 DAQ_LINKAGE int daq_acquire(const DAQ_Module_t *module, void *handle, int cnt, DAQ_Analysis_Func_t callback, void *user);
 DAQ_LINKAGE int daq_acquire_with_meta(const DAQ_Module_t *module, void *handle, int cnt,
@@ -68,6 +83,7 @@ DAQ_LINKAGE int daq_acquire_with_meta(const DAQ_Module_t *module, void *handle, 
                                       void *user);
 DAQ_LINKAGE int daq_inject(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, const uint8_t *packet_data, uint32_t len, int reverse);
 DAQ_LINKAGE int daq_breakloop(const DAQ_Module_t *module, void *handle);
+DAQ_LINKAGE int daq_breakloop_ext(const DAQ_Module_t *module);
 DAQ_LINKAGE int daq_stop(const DAQ_Module_t *module, void *handle);
 DAQ_LINKAGE int daq_shutdown(const DAQ_Module_t *module, void *handle);
 DAQ_LINKAGE DAQ_State daq_check_status(const DAQ_Module_t *module, void *handle);
@@ -78,6 +94,7 @@ DAQ_LINKAGE uint32_t daq_get_capabilities(const DAQ_Module_t *module, void *hand
 DAQ_LINKAGE int daq_get_datalink_type(const DAQ_Module_t *module, void *handle);
 DAQ_LINKAGE const char *daq_get_error(const DAQ_Module_t *module, void *handle);
 DAQ_LINKAGE void daq_clear_error(const DAQ_Module_t *module, void *handle);
+DAQ_LINKAGE int daq_get_device_index(const DAQ_Module_t *module, void *handle, const char *device);
 DAQ_LINKAGE int daq_modify_flow(const DAQ_Module_t *module, void *handle, const DAQ_PktHdr_t *hdr, DAQ_ModFlow_t *modify);
 DAQ_LINKAGE int daq_hup_prep(const DAQ_Module_t *module, void *handle, void **new_config);
 DAQ_LINKAGE int daq_hup_apply(const DAQ_Module_t *module, void *handle, void *new_config, void **old_config);

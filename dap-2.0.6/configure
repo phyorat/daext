@@ -797,6 +797,7 @@ with_libpcap_libraries
 with_dnet_includes
 with_dnet_libraries
 with_netmap_includes
+with_species_includes
 with_dpdk_includes
 with_dpdk_libraries
 enable_bundled_modules
@@ -1481,6 +1482,7 @@ Optional Packages:
   --with-dnet-includes=DIR    dnet include directory
   --with-dnet-libraries=DIR   dnet library directory
   --with-netmap-includes=DIR    netmap include directory
+  --with-species-includes=DIR    species include directory
   --with-dpdk-includes=DIR    dpdk include directory
   --with-dpdk-libraries=DIR    dpdk library directory
 
@@ -13200,6 +13202,19 @@ fi
 
 if test "x$with_netmap_includes" != "xno"; then
     CPPFLAGS="${CPPFLAGS} -I${with_netmap_includes}"
+fi
+
+
+# Check whether --with-species_includes was given.
+if test "${with_species_includes+set}" = set; then :
+  withval=$with_species_includes; with_species_includes="$withval"
+else
+  with_species_includes="no"
+fi
+
+
+if test "x$with_species_includes" != "xno"; then
+    CPPFLAGS="${CPPFLAGS} -I${with_species_includes}"
 fi
 
 

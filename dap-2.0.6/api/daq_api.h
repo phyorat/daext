@@ -47,6 +47,14 @@ struct _daq_module
     int (*initialize) (const DAQ_Config_t *config, void **ctxt_ptr, char *errbuf, size_t len);
     /* Set the module's BPF based on the given string */
     int (*set_filter) (void *handle, const char *filter);
+    int (*rsp_pc_filter) (void *handle, const void *sf_data, int datalen,
+            DAQ_Set_SF_Config sfconf_cb, daq_sf_req_type *targ_type);
+    int (*req_pc_filter) (void *handle, void *dst_data, daq_sf_req_type req_type);
+    int (*sf_get_mbuf) (void *handle, void **mbuf);
+    int (*sf_put_mbuf) (void *handle, void *mbuf, uint8_t pool_idx);
+    int (*sf_get_mbufs) (void *handle, void *mbufs, uint8_t pool_idx);
+    int (*sf_send_mbuf) (void *handle, void *mbuf, uint8_t ring_idx, uint8_t pool_idx);
+    void *(*dp_rte_memcpy) (void *mbuf_dst, const void *mbuf_src, uint32_t buf_len);
     /* Complete device opening and begin queuing packets if they have not been already. */
     int (*start) (void *handle);
     /* Acquire up to <cnt> packets and call <callback> for each with <user> as the final argument.
@@ -58,6 +66,7 @@ struct _daq_module
     int (*inject) (void *handle, const DAQ_PktHdr_t *hdr, const uint8_t *packet_data, uint32_t len, int reverse);
     /* Force breaking out of the acquisition loop after the current iteration. */
     int (*breakloop) (void *handle);
+    int (*breakloop_ext) (void);
     /* Stop queuing packets, if possible */
     int (*stop) (void *handle);
     /* Close the device and clean up */
