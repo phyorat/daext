@@ -32,8 +32,8 @@ structure, or NULL if we're at the last one*/
 #define CONTROLLEN  CMSG_LEN(sizeof(int))
 #define MAXLINE     256
 
-void epfd_unlink_all(DpdkInstance *dpdk_ins);
-int epfd_server(Dpdk_Context_t *dpdkc, int qid, int fd_to_send);
+void epfd_unlink_all(Dpdk_Context_t *dpdkc);
+int epfd_server(Dpdk_Context_t *dpdkc, uint8_t pid, uint8_t qid, int fd_to_send);
 int epfd_server_loop(Dpdk_Context_t *dpdkc);
 int epfd_client(Dpdk_Context_t *dpdkc);
 

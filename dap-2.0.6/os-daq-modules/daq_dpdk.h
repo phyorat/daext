@@ -55,6 +55,7 @@
 #define DAQ_DPDK_SECONDARY_EPFD_RETRY       5
 
 #define DAQ_DPDK_SECONDARY_INIT_DELAY       15   //Seconds
+#define DAQ_DPDK_SECONDARY_EPFD_DELAY       5
 
 //#define RX_CNT_TRACK
 //#define RX_CSUM_TRACK
@@ -62,7 +63,7 @@
 //IPC
 #define DAQ_DPDK_RING_MSG_TOLERATE              8
 #define DAQ_DPDK_RING_MSG_QUEUE_SIZE            DAQ_DPDK_RING_MSG_TOLERATE
-#define DAQ_DPDK_RING_MSG_DATA_LEN              256     //Message maximum data size, change this accordingly
+#define DAQ_DPDK_RING_MSG_DATA_LEN              8192     //Message maximum data size, change this accordingly
 #define DAQ_DPDK_RING_MSG_POOL_SIZE             1024
 #define DAQ_DPDK_RING_MSG_POOL_CACHE            32
 #define DAQ_DPDK_RING_MSG_HB_LOST_MAX           50      // 50<<0x01, 100 seconds
@@ -185,8 +186,8 @@ typedef struct _dpdk_context
     int snaplen;
     int timeout;
     int debug;
-    int epfds[MAX_QUEUE_NUM*MAX_NIC_PORT_NUM];
-    int socfds[MAX_QUEUE_NUM*MAX_NIC_PORT_NUM];
+    int epfds[MAX_NIC_PORT_NUM][MAX_QUEUE_NUM];
+    int socfds[MAX_NIC_PORT_NUM][MAX_QUEUE_NUM];
     enum rte_proc_type_t proc_type;
     int mulp_sync_count;
     int intf_count;

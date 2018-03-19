@@ -444,7 +444,7 @@ static int destroy_dpdkc(Dpdk_Context_t *dpdkc)
 
     if ( RTE_PROC_PRIMARY == dpdkc->proc_type ) {
         RTE_LOG(INFO, EAL, "%s: Remove all epfd ipc fd\n", __func__);
-        epfd_unlink_all(dpdkc->rx_ins);
+        epfd_unlink_all(dpdkc);
     }
 
     /* Free all of the device instances. */
@@ -1665,7 +1665,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t *config, void **ctxt_ptr, char
             goto err;
         }*/
         //epfd ipc communication
-        epfd_unlink_all(dpdkc->rx_ins);
+        epfd_unlink_all(dpdkc);
 
         //Init master-stats sequence
         msg_seq_s = (uint64_t*)dpdkc->st_seq_queues;
@@ -1700,7 +1700,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t *config, void **ctxt_ptr, char
             dpdk_daq_send_dpl_cfg(dpdkc->ap_dpl);*/
 
 #ifdef DAQ_DPDK_POWER_CTL
-        sleep(DAQ_DPDK_SECONDARY_INIT_DELAY);
+        sleep(DAQ_DPDK_SECONDARY_EPFD_DELAY);
         if ( epfd_wait_get(dpdkc) ) {
             snprintf(errbuf, errlen, "%s: Get epfd from primary lcore failed!", __FUNCTION__);
             goto err;
@@ -1816,6 +1816,7 @@ static int dpdk_daq_pc_filter_rsp(void *handle, const void *sf_data, int datalen
     void *msg;
     //struct rte_mempool *msg_mpool = instance->daq_mpool[MPOOL_IPCRSEQ];
     struct rte_mempool *msg_mpool = dpdkc->daq_mpool[MPOOL_IPCRSEQ];
+    struct rte_ring *rsp_ring = dpdkc->daq_ring[RING_IPC_PCRSP];
     pktcnt_msg *pc_msg;
     pktcnt_msg pc_msg_rsp;
     int ret, ret_type;
@@ -1850,6 +1851,7 @@ static int dpdk_daq_pc_filter_rsp(void *handle, const void *sf_data, int datalen
         break;
     case DAQ_SF_SET_CONFIG:
         //Save Config
+        rsp_ring = dpdkc->ap_ring[RING_MSG_SUR];
         pc_msg_rsp.rtn = sfconf_cb(pc_msg->msg_ptr);
         pc_msg_rsp.msg_type = DAQ_SF_SET_CONFIG_RTN;
         ret_type = DAQ_SUCCESS;
@@ -1865,7 +1867,8 @@ static int dpdk_daq_pc_filter_rsp(void *handle, const void *sf_data, int datalen
 
     //Send data
     if ( DAQ_SF_DP_SWAP_RTN == pc_msg_rsp.msg_type
-            || DAQ_SF_STACK_DP_SWAP_RTN == pc_msg_rsp.msg_type ) {
+            || DAQ_SF_STACK_DP_SWAP_RTN == pc_msg_rsp.msg_type
+            || DAQ_SF_SET_CONFIG_RTN == pc_msg_rsp.msg_type ) {
         DAQ_RTE_LOG_DEEP("%s: pc req done in queue[%d] process, send rsp--(%d)\n",
                 __func__, instance->rx_queue_s, pc_msg_rsp.msg_type);
 
@@ -1874,7 +1877,7 @@ static int dpdk_daq_pc_filter_rsp(void *handle, const void *sf_data, int datalen
             rte_panic("Failed to get message buffer\n");
         rte_memcpy(msg, &pc_msg_rsp, sizeof(pc_msg_rsp));
 
-        ret = rte_ring_enqueue(/*instance*/dpdkc->daq_ring[RING_IPC_PCRSP], msg);
+        ret = rte_ring_enqueue(rsp_ring, msg);
         if ( -ENOBUFS == ret ) {
             DAQ_RTE_LOG("%s: ring full for msg in queue[%d] process\n", __func__, instance->rx_queue_s);
             rte_mempool_put(msg_mpool, msg);
@@ -1962,6 +1965,74 @@ static int dpdk_daq_pc_filter_req(void *handle, void *dst_data, daq_sf_req_type 
                 break;
             }
         } while(1);
+    }
+
+    return ret;
+}
+
+//Request Pkt Count Filter
+static int dpdk_daq_multicast_req(void *handle, void *dst_data, daq_sf_req_type req_type)
+{
+    uint8_t p_idx, q_idx;
+    Dpdk_Context_t *dpdkc = (Dpdk_Context_t *) handle;
+    DpdkInstance *instance;
+    void *msg;
+    pktcnt_msg *pc_msg;
+    DAQ_Filter_Config *df_cfg;
+    int ret;
+
+    if ( DAQ_STATE_STARTED != dpdkc->state )
+        return DAQ_USER_SF_OP_NONE;
+
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        instance = dpdkc->instances[p_idx];
+        for (q_idx=0; q_idx<instance->n_rx_queue; q_idx++) {
+            //Preparing Message
+            if (rte_mempool_get(instance->daq_mpools[MPOOL_IPCRSEQ][q_idx], &msg) < 0)
+                rte_panic("Failed to get message buffer\n");
+
+            pc_msg = (pktcnt_msg*)msg;
+            pc_msg->msg_type = req_type;
+            pc_msg->msg_ptr = msg + sizeof(pktcnt_msg);
+
+            df_cfg = (DAQ_Filter_Config*)dst_data;
+            rte_memcpy(pc_msg->msg_ptr, dst_data,
+                    (long)offsetof(DAQ_Filter_Config, content)+df_cfg->config_size);//, sizeof(DAQ_Filter_Config));
+            DAQ_RTE_LOG_DEEP("%s: save filter config, len %d\n", __func__,
+                    (long)offsetof(DAQ_Filter_Config, content)+df_cfg->config_size);
+
+            DAQ_RTE_LOG_DEEP("%s: send pc req(%d) in queue[%d] process\n",
+                    __func__, pc_msg->msg_type, instance->rx_queue_s);
+
+            ret = rte_ring_enqueue(instance->daq_rings[RING_IPC_PCREQ][q_idx], msg);
+            if ( -ENOBUFS == ret ) {
+                DAQ_RTE_LOG("%s: ring full for msg in queue[%d] process\n", __func__, q_idx);
+                rte_mempool_put(instance->daq_mpools[MPOOL_IPCRSEQ][q_idx], msg);
+            }
+            else if ( -EDQUOT == ret ) {
+                DAQ_RTE_LOG("%s: Quota exceeded msg in queue[%d] process\n", __func__, q_idx);
+            }
+        }
+    }
+
+    ret = 0;
+    //Wait data back
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        instance = dpdkc->instances[p_idx];
+        for (q_idx=0; q_idx<instance->n_rx_queue; q_idx++) {
+            do {
+                if (rte_ring_dequeue(instance->ap_rings[RING_MSG_SUR][q_idx], &msg) < 0){
+                    usleep(100);
+                }
+                else{
+                    DAQ_RTE_LOG_DEEP("%s: get pc rsp--(%d) in queue[%d] process\n",
+                            __func__, ((pktcnt_msg*)msg)->msg_type, q_idx);
+                    ret = ((pktcnt_msg*)msg)->rtn;
+                    rte_mempool_put(instance->daq_mpools[MPOOL_IPCRSEQ][q_idx], msg);
+                    break;
+                }
+            } while(1);
+        }
     }
 
     return ret;
@@ -2097,6 +2168,48 @@ static int dpdk_daq_sf_send_mbuf(void *handle, void *mbuf, uint8_t ring_idx, uin
     DAQ_RTE_LOG_DEEP("%s: send mbuf(%d) 0x%lx\n", __func__,
             buf_type, (unsigned long)mbuf);
 
+    return 0;
+}
+
+int dpdk_daq_sf_multicast(void *handle, void *mdata, uint32_t md_len, uint8_t ring_idx, uint8_t pool_idx)
+{
+    uint8_t p_idx, q_idx;
+    int ret;
+    Dpdk_Context_t *dpdkc = (Dpdk_Context_t *) handle;
+    void *mbuf;
+    DpdkInstance *instance;
+
+    if ( ring_idx >= AP_RING_COUNT
+            || pool_idx >= AP_MPOOL_COUNT )
+        return 1;
+
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        instance = dpdkc->instances[p_idx];
+        for (q_idx=0; q_idx<instance->n_rx_queue; q_idx++) {
+            if (rte_mempool_get(instance->ap_mpools[pool_idx][q_idx], &mbuf) < 0) {
+                DAQ_RTE_LOG("%s: Failed to get sf_multicast_mbuf[%u][%u]\n", __func__,
+                        p_idx, q_idx);
+                return 1;
+            }
+
+            rte_memcpy(mbuf, mdata, md_len);
+
+            ret = rte_ring_enqueue(instance->ap_rings[ring_idx][q_idx], mbuf);
+            if ( -ENOBUFS == ret ) {
+                DAQ_RTE_LOG_DEEP("%s: ring[%d] ring full for msg in queue[%d] process\n", __func__,
+                        ring_idx, q_idx);
+                rte_mempool_put(instance->ap_mpools[pool_idx][q_idx], mbuf);
+                return 1;
+            }
+            else if ( -EDQUOT == ret ) {
+                DAQ_RTE_LOG_DEEP("%s: ring[%d] Quota exceeded msg in queue[%d] process\n", __func__,
+                        ring_idx, q_idx);
+                return 1;
+            }
+        }
+    }
+
+    DAQ_RTE_LOG_DEEP("%s: multicast mbuf(%d).\n", __func__, pool_idx);
     return 0;
 }
 
@@ -2257,12 +2370,13 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
 //        struct rte_mbuf *m_send;
 //        uint16_t nb_tx;
 
-#ifdef DAQ_DPDK_POWER_CTL
-        daq_dpdk_power_preheuris(rte_rdtsc());
-#endif
-
         //for (instance = dpdkc->instances; instance; instance = instance->next) {
         instance = dpdkc->rx_ins;
+
+#ifdef DAQ_DPDK_POWER_CTL
+            daq_dpdk_power_preheuris(instance->lcore_ids[instance->rx_queue_s]);
+#endif
+
             /* Has breakloop() been called? */
             if ( unlikely( dpdkc->break_loop ) ) {
                 RTE_LOG(INFO, EAL, "Exiting from Dpdk Context\n");
@@ -2612,6 +2726,7 @@ const DAQ_Module_t dpdk_daq_module_data =
     /* .set_filter = */ dpdk_daq_set_filter,
     /* .rsp_pc_filter = */ dpdk_daq_pc_filter_rsp,
     /* .req_pc_filter = */ dpdk_daq_pc_filter_req,
+    /* .sf_mc_msg = */ dpdk_daq_multicast_req,
     /* .sf_get_mbuf = */ dpdk_daq_sf_get_mbuf,
     /* .sf_put_mbuf = */ dpdk_daq_sf_put_mbuf,
     /* .sf_get_mbufs = */ dpdk_daq_sf_get_mbufs,

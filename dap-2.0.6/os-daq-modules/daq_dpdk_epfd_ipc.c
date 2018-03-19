@@ -102,23 +102,30 @@ static int recv_fd(int fd, ssize_t (*userfunc)(int, const void *, size_t))
 	return -1;
 }
 
-static inline void epfd_get_conn_path(int qid, char *buf, int buflen) {
+static inline void epfd_get_conn_path(uint8_t pid, uint8_t qid, char *buf, int buflen)
+{
 	if (*socket_path == '\0') {
 		buf[0] = '\0';
-		snprintf(&(buf[1]), buflen - 2, "%s_%d", socket_path + 1, qid);
+		snprintf(&(buf[1]), buflen - 2, "%s_%u_%u", socket_path + 1, pid, qid);
 	} else {
-		snprintf(buf, buflen - 1, "%s_%d", socket_path, qid);
+		snprintf(buf, buflen - 1, "%s_%u_%u", socket_path, pid, qid);
 	}
 }
 
-void epfd_unlink_all(DpdkInstance *dpdk_ins) {
-	uint8_t queueid;
-	char sun_path[128];
+void epfd_unlink_all(Dpdk_Context_t *dpdkc)
+{
+    uint8_t p_idx, portid, queueid;
+    DpdkInstance *dpdk_ins;
+    char sun_path[128];
 
-	for (queueid = 0; queueid < dpdk_ins->n_rx_queue; ++queueid) {
-		epfd_get_conn_path(queueid, sun_path, sizeof(sun_path));
-		unlink(sun_path);
-	}
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        dpdk_ins = dpdkc->instances[p_idx];
+        portid = dpdk_ins->port;
+        for (queueid = 0; queueid < dpdk_ins->n_rx_queue; ++queueid) {
+            epfd_get_conn_path(portid, queueid, sun_path, sizeof(sun_path));
+            unlink(sun_path);
+        }
+    }
 }
 
 /*
@@ -127,33 +134,34 @@ void epfd_unlink_all(DpdkInstance *dpdk_ins) {
  * We have a 2-byte protocol for receiving the fd from send_fd().
  */
 
-int epfd_server(Dpdk_Context_t *dpdkc, int qid, int fd_to_send) {
+int epfd_server(Dpdk_Context_t *dpdkc, uint8_t pid, uint8_t qid, int fd_to_send)
+{
 	struct sockaddr_un addr;
 	int cl;
 
-	if ((dpdkc->socfds[qid] = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+	if ((dpdkc->socfds[pid][qid] = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
 		perror("socket error");
 		return -1;
 	}
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	epfd_get_conn_path(qid, addr.sun_path, sizeof(addr.sun_path));
+	epfd_get_conn_path(pid, qid, addr.sun_path, sizeof(addr.sun_path));
 
 	DAQ_RTE_LOG("%s: addr.sun_path: %s\n", __func__, addr.sun_path);
 
-	if (bind(dpdkc->socfds[qid], (struct sockaddr*) &addr, sizeof(addr))
+	if (bind(dpdkc->socfds[pid][qid], (struct sockaddr*) &addr, sizeof(addr))
 			== -1) {
 		perror("bind error");
 		return -1;
 	}
 
-	if (listen(dpdkc->socfds[qid], 1) == -1) {
+	if (listen(dpdkc->socfds[pid][qid], 1) == -1) {
 		perror("listen error");
 		return -1;
 	}
 
-	if ((cl = accept(dpdkc->socfds[qid], NULL, NULL)) == -1) {
+	if ((cl = accept(dpdkc->socfds[pid][qid], NULL, NULL)) == -1) {
 		perror("accept error");
 		return errno;
 	}
@@ -177,30 +185,39 @@ int epfd_server(Dpdk_Context_t *dpdkc, int qid, int fd_to_send) {
 	return 0;
 }
 
-int epfd_server_loop(Dpdk_Context_t *dpdkc) {
-	int cl, max_fd;
-	int i, ret;
-	fd_set readfds, read_fd_set;
-	struct timeval tv;
+int epfd_server_loop(Dpdk_Context_t *dpdkc)
+{
+    uint8_t p_idx, portid;
+    int cl, max_fd;
+    int i, ret;
+    fd_set readfds, read_fd_set;
+    struct timeval tv;
+    DpdkInstance *dpdk_ins;
 
-	FD_ZERO(&readfds);
-	max_fd = 0;
-	for (i = 0; i < dpdkc->rx_ins->n_rx_queue; i++) {
+    FD_ZERO(&readfds);
+    max_fd = 0;
+
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        dpdk_ins = dpdkc->instances[p_idx];
+        portid = dpdk_ins->port;
+
+        for (i = 0; i < dpdk_ins->n_rx_queue; i++) {
 #ifndef DAQ_DPDK_WITH_MINERVA
-		if (i == dpdkc->rx_ins->rx_queue_s)
-			continue;
+            if (i == dpdkc->rx_ins->rx_queue_s)
+                continue;
 #endif
 
-		FD_SET(dpdkc->socfds[i], &readfds);
-		//RTE_LOG(INFO, EAL, "%s: add fd[%d] to sock handler\n", __func__, i);
-		if (max_fd < dpdkc->socfds[i])
-			max_fd = dpdkc->socfds[i];
-	}
+            FD_SET(dpdkc->socfds[portid][i], &readfds);
+            //RTE_LOG(INFO, EAL, "%s: add fd[%d] to sock handler\n", __func__, i);
+            if (max_fd < dpdkc->socfds[portid][i])
+                max_fd = dpdkc->socfds[portid][i];
+        }
+    }
 
 	do {
 		read_fd_set = readfds;
-		tv.tv_sec = 1;
-		tv.tv_usec = 0;
+		tv.tv_sec = 0;
+		tv.tv_usec = 1000;
 
 		ret = select(max_fd + 1, &read_fd_set, NULL, NULL, &tv);
 		if (-1 == ret) {
@@ -216,26 +233,31 @@ int epfd_server_loop(Dpdk_Context_t *dpdkc) {
 
 		DAQ_RTE_LOG("%s: sock data available\n", __func__);
 
-		for (i = 0; i < dpdkc->rx_ins->n_rx_queue; i++) {
-			if (FD_ISSET(dpdkc->socfds[i], &read_fd_set)) {
-			    DAQ_RTE_LOG("%s: handling sock from queue %d\n", __func__, i);
-				if ((cl = accept(dpdkc->socfds[i], NULL, NULL)) == -1) {
-					perror("accept error");
-					return errno;
-				}
+	    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+	        dpdk_ins = dpdkc->instances[p_idx];
+	        portid = dpdk_ins->port;
 
-				send_fd(cl, dpdkc->epfds[i]);
-				close(cl);
-			}
-		}
+	        for (i = 0; i < dpdk_ins->n_rx_queue; i++) {
+	            if (FD_ISSET(dpdkc->socfds[portid][i], &read_fd_set)) {
+	                DAQ_RTE_LOG("%s: handling sock from queue %d\n", __func__, i);
+	                if ((cl = accept(dpdkc->socfds[portid][i], NULL, NULL)) == -1) {
+	                    perror("accept error");
+	                    return errno;
+	                }
+
+	                send_fd(cl, dpdkc->epfds[portid][i]);
+	                close(cl);
+	            }
+	        }
+	    }
 	}while(0);
 
 	return 0;
 }
 
-int epfd_client(Dpdk_Context_t *dpdkc) {
+int epfd_client(Dpdk_Context_t *dpdkc)
+{
 	struct sockaddr_un addr;
-	int qid = dpdkc->rx_ins->rx_queue_s;
 	int fd;
 	int newfd;
 
@@ -251,7 +273,7 @@ int epfd_client(Dpdk_Context_t *dpdkc) {
 	newfd = -1;
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	epfd_get_conn_path(qid, addr.sun_path, sizeof(addr.sun_path));
+	epfd_get_conn_path(dpdkc->rx_ins->port, dpdkc->rx_ins->rx_queue_s, addr.sun_path, sizeof(addr.sun_path));
 
 	DAQ_RTE_LOG("%s: addr.sun_path: %s\n", __func__, addr.sun_path);
 
@@ -261,7 +283,7 @@ int epfd_client(Dpdk_Context_t *dpdkc) {
 		usleep(1000);
 	}
 
-	sleep(DAQ_DPDK_SECONDARY_INIT_DELAY);
+	sleep(DAQ_DPDK_SECONDARY_EPFD_DELAY);
 
 	if (connect(fd, (struct sockaddr*) &addr, sizeof(addr)) == -1) {
 		perror("connect error");
@@ -280,11 +302,8 @@ int epfd_client(Dpdk_Context_t *dpdkc) {
 	 }*/
 
 	newfd = recv_fd(fd, NULL);
-
-#ifdef DAQ_DPDK_POWER_CTL
 	if ( newfd >= 0 )
 	    dpdkc->power_heurs->intr_en = 1;
-#endif
 
 	close(fd);
 

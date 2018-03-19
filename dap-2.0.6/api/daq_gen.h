@@ -39,6 +39,7 @@
 #define DAQ_DP_RING_DG_INT            "digger-ring"
 
 #define DAQ_DP_RING_MASTER            "master-msg"
+#define DAQ_DP_RING_MSG_SV            "surveyor-msg_s%dp%dq%d"
 #define DAQ_DP_RING_MSG_DG            "digger-msg"
 #define DAQ_DP_RING_MSG_SQ            "squirrel-msg"
 #define DAQ_DP_RING_MSG_PT            "portrait-msg"

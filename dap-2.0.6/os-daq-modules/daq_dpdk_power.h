@@ -186,12 +186,11 @@ static int signalfd_register(DpdkInstance *dpdk_ins)
     return 0;
 }
 
-static int event_register(Dpdk_Context_t *dpdkc)
+static int event_msix_fd_reg(Dpdk_Context_t *dpdkc, DpdkInstance *dpdk_ins)
 {
-	DpdkInstance *dpdk_ins = dpdkc->rx_ins;
     uint8_t portid, queueid;
     uint32_t data;
-    int ret;//, epfd;
+    int ret;
 
     portid = dpdk_ins->port;
 
@@ -201,9 +200,9 @@ static int event_register(Dpdk_Context_t *dpdkc)
         DAQ_RTE_LOG("%s: rx interruput setup for port %d-queue %d\n",
                 __func__, portid, queueid);
 
-        dpdkc->epfds[queueid] = eal_init_tls_epfd();
+        dpdkc->epfds[portid][queueid] = eal_init_tls_epfd();
         ret = rte_eth_dev_rx_intr_ctl_q(portid, queueid,
-        		dpdkc->epfds[queueid],//RTE_EPOLL_PER_THREAD,
+                dpdkc->epfds[portid][queueid],//RTE_EPOLL_PER_THREAD,
                 RTE_INTR_EVENT_ADD,
                 (void *)((uintptr_t)data));
         if (ret) {
@@ -220,14 +219,14 @@ static int event_register(Dpdk_Context_t *dpdkc)
         {
 #endif
             DAQ_RTE_LOG("%s: wait for port %d-queue %d to get epfd(%d)\n",
-                    __func__, portid, queueid, dpdkc->epfds[queueid]);
-            ret = epfd_server(dpdkc, queueid, dpdkc->epfds[queueid]);
+                    __func__, portid, queueid, dpdkc->epfds[portid][queueid]);
+            ret = epfd_server(dpdkc, portid, queueid, dpdkc->epfds[portid][queueid]);
             if ( ret ) {
                 DAQ_RTE_LOG("%s: port %d-queue %d send epfd fail, errno %d\n",
                         __func__, portid, queueid, ret);
                 if ( 4 == ret ) {
-                	RTE_LOG(ALERT, EAL, "%s: Interrupt Signal, exit\n", __func__);
-                	return ret;
+                    RTE_LOG(ALERT, EAL, "%s: Interrupt Signal, exit\n", __func__);
+                    return ret;
                 }
             }
             else {
@@ -235,6 +234,17 @@ static int event_register(Dpdk_Context_t *dpdkc)
                         __func__, portid, queueid);
             }
         }
+    }
+
+    return 0;
+}
+
+static int event_register(Dpdk_Context_t *dpdkc)
+{
+    uint8_t p_idx;
+
+    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {
+        event_msix_fd_reg(dpdkc, dpdkc->instances[p_idx]);
     }
 
     return 0;
@@ -408,14 +418,15 @@ static int daq_dpdk_power_heuristic_init(Dpdk_Context_t *dpdkc)
     return 0;
 }
 
-static inline int daq_dpdk_power_preheuris(uint64_t cur_tsc_power)
+static inline int daq_dpdk_power_preheuris(unsigned lcore_id)
 {
-    unsigned lcore_id = rte_lcore_id();
+    //unsigned lcore_id = rte_lcore_id();
 #ifdef DAQ_DPDK_POWER_FREQ_CTL
+    uint64_t cur_tsc_power = rte_rdtsc();
     uint64_t diff_tsc_power;
+    stats[lcore_id].nb_iteration_looped++;
 #endif
 
-    stats[lcore_id].nb_iteration_looped++;
     stats[lcore_id].lcore_rx_idle_count = 0;
 
 #ifdef DAQ_DPDK_POWER_FREQ_CTL
@@ -435,7 +446,7 @@ static inline int daq_dpdk_power_heuris(DpdkInstance *dpdk_ins, uint8_t queueid,
 #ifdef DAQ_DPDK_POWER_FREQ_CTL
     uint8_t portid = dpdk_ins->port;
 #endif
-    unsigned lcore_id = dpdk_ins->lcore_id;
+    unsigned lcore_id = dpdk_ins->lcore_ids[queueid];
     struct lcore_rx_queue *rx_queue;
 
     rx_queue = &(rx_queue_list[queueid]);
@@ -451,18 +462,16 @@ static inline int daq_dpdk_power_heuris(DpdkInstance *dpdk_ins, uint8_t queueid,
          */
         //RTE_LOG(INFO, EAL, "queue %d is idle, count %d\n", queueid, rx_queue->zero_rx_packet_count);
 
-        rx_queue->zero_rx_packet_count++;
-        if (rx_queue->zero_rx_packet_count <=
-                    MIN_ZERO_POLL_COUNT) {
-            //continue;
+        if (rx_queue->zero_rx_packet_count++ <= MIN_ZERO_POLL_COUNT)
             return 0;
-        }
 
-        rx_queue->idle_hint = power_idle_heuristic(rx_queue->zero_rx_packet_count);
+        rx_queue->idle_hint = (rx_queue->zero_rx_packet_count < SUSPEND_THRESHOLD) ?
+                MINIMUM_SLEEP_TIME : SUSPEND_THRESHOLD;//power_idle_heuristic(rx_queue->zero_rx_packet_count);
         stats[lcore_id].lcore_rx_idle_count++;
     }
     else {
         rx_queue->zero_rx_packet_count = 0;
+
 #ifdef DAQ_DPDK_POWER_FREQ_CTL
         /**
          * do not scale up frequency immediately as
@@ -481,16 +490,16 @@ static inline int daq_dpdk_power_heuris(DpdkInstance *dpdk_ins, uint8_t queueid,
 
 static inline int daq_dpdk_power_heurissum(DpdkInstance *dpdk_ins)
 {
-    struct lcore_rx_queue *rx_queue;
     uint32_t i, lcore_idle_hint = 0;
-    unsigned lcore_id = dpdk_ins->lcore_id;
+    unsigned lcore_id = dpdk_ins->lcore_ids[dpdk_ins->rx_queue_s];
 #ifdef DAQ_DPDK_POWER_FREQ_CTL
     enum freq_scale_hint_t lcore_scaleup_hint;
 #endif
+
     /*RTE_LOG(INFO, EAL, "%s: core[%d] lcore_rx_idle_count %d\n", __func__,
             lcore_id, stats[lcore_id].lcore_rx_idle_count);*/
 
-    if ( !power_track.intr_en )
+    if ( unlikely(!power_track.intr_en) )
         return 0;
 
     if (likely(stats[lcore_id].lcore_rx_idle_count != dpdk_ins->rx_queue_h)) {
@@ -520,16 +529,13 @@ static inline int daq_dpdk_power_heurissum(DpdkInstance *dpdk_ins)
          * sleep in a conservative manner, meaning sleep as
          * less as possible.
          */
-        for (i = dpdk_ins->rx_queue_s,
-                lcore_idle_hint = rx_queue_list[dpdk_ins->rx_queue_s].idle_hint;
-                i < dpdk_ins->rx_queue_e; ++i) {
-            rx_queue = &(rx_queue_list[i]);
-            if ( lcore_idle_hint > rx_queue->idle_hint )
-                lcore_idle_hint = rx_queue->idle_hint;
+        lcore_idle_hint = rx_queue_list[dpdk_ins->rx_queue_s].idle_hint;
+        for (i=dpdk_ins->rx_queue_s+1; i < dpdk_ins->rx_queue_e; i++) {
+            if ( lcore_idle_hint > rx_queue_list[i].idle_hint )
+                lcore_idle_hint = rx_queue_list[i].idle_hint;
         }
 
-        if ( 0 < lcore_idle_hint
-                && lcore_idle_hint < SUSPEND_THRESHOLD) {
+        if ( 0 < lcore_idle_hint && lcore_idle_hint < SUSPEND_THRESHOLD) {
             /**
              * execute "pause" instruction to avoid context
              * switch which generally take hundred of
@@ -541,13 +547,13 @@ static inline int daq_dpdk_power_heurissum(DpdkInstance *dpdk_ins)
             /* suspend until rx interrupt trigges
             RTE_LOG(INFO, EAL, "%s: idle hint %d, suspend until rx interrupt trigges\n",
                     __func__, lcore_idle_hint);*/
-            if (power_track.intr_en) {
+            //if (power_track.intr_en) {
                 turn_on_intr(dpdk_ins);
                 sleep_until_rx_interrupt(dpdk_ins);
-            }
+            /*}
             else {
                 rte_delay_us(lcore_idle_hint);
-            }
+            }*/
             /* start receiving packets immediately */
             //goto start_rx;
             return 1;

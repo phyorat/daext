@@ -178,7 +178,7 @@ void daq_dpdk_apmsg_send(Dpdk_Context_t *dpdkc, uint8_t apid, uint8_t rings)
     struct rte_ring *msg_ring;
 
     for (i=0; i<rings; i++, msg_ring_apid++) {
-        if ( 0xff==*msg_ring_apid || AP_RING_COUNT<*msg_ring_apid )
+        if ( 0xff==*msg_ring_apid || AP_RING_COUNT<=*msg_ring_apid )
             break;
 
         msg_ring = dpdkc->ap_ring[*msg_ring_apid];
@@ -345,7 +345,7 @@ int sf_confluence(void *args)
                     DAQ_RTE_LOG("%s: Cfl mbuf count(%d) cleared for burn-in\n", __func__, mbuf_sum);
                     //I/O operation
                     if ( !skip_round )
-                        skip_round = dpdkc->ap_dpl->sf_confluence(mbuf_cfl_dp, NULL, 0, MPOOL_STATSFLOW, 1);
+                        skip_round = dpdkc->ap_dpl->sf_confluence(mbuf_cfl_dp, NULL, 0, MPOOL_STATSFLOW, 2);
                     else
                         skip_round--;
                     mbuf_sum = 0;
@@ -559,7 +559,7 @@ int sys_ifinfo(void *args)
             epfd_server_loop(dpdkc);
         }
         else {
-            sleep(1);
+            usleep(1000);
         }
 #else
         usleep(1000);

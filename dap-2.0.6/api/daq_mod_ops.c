@@ -104,6 +104,18 @@ DAQ_LINKAGE int daq_sf_ipc_req(const DAQ_Module_t *module, void *handle,
     return module->req_pc_filter(handle, dst_data, req_type);
 }
 
+DAQ_LINKAGE int daq_sf_mc_req(const DAQ_Module_t *module, void *handle,
+        void *dst_data, daq_sf_req_type req_type)
+{
+    if (!module)
+        return DAQ_ERROR_NOMOD;
+
+    if (!handle)
+        return DAQ_ERROR_NOCTX;
+
+    return module->sf_mc_msg(handle, dst_data, req_type);
+}
+
 DAQ_LINKAGE int daq_sf_get_mbuf(const DAQ_Module_t *module,
         void *handle,
         void **mbuf)

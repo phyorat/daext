@@ -50,6 +50,7 @@ struct _daq_module
     int (*rsp_pc_filter) (void *handle, const void *sf_data, int datalen,
             DAQ_Set_SF_Config sfconf_cb, daq_sf_req_type *targ_type);
     int (*req_pc_filter) (void *handle, void *dst_data, daq_sf_req_type req_type);
+    int (*sf_mc_msg) (void *handle, void *dst_data, daq_sf_req_type req_type);
     int (*sf_get_mbuf) (void *handle, void **mbuf);
     int (*sf_put_mbuf) (void *handle, void *mbuf, uint8_t pool_idx);
     int (*sf_get_mbufs) (void *handle, void *mbufs, uint8_t pool_idx);

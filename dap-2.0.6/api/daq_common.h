@@ -257,6 +257,7 @@ typedef enum _SUR_DAQ_RING_TYPE
     RING_META_PAYLOAD,
     RING_DIGGER,
     RING_MSG_MASTER,        //ap->master(daq)
+    RING_MSG_SUR,           //surveyor->master
     RING_AP_MSG_DG,         //master->digger
     RING_AP_MSG_SQ,         //master->squirrel
     RING_AP_MSG_PT,         //master->portrait
@@ -364,7 +365,7 @@ typedef struct __DAQ_Filter_Config
 {
     uint32_t uOperation; //Operation as defined in module.h
     uint32_t config_size;
-    char content[DAQ_FILTER_CONFIG_DATA_SIZE];
+    uint8_t content[4088];
 }DAQ_Filter_Config;
 
 #define DAQ_CFG_PROMISC     0x01
