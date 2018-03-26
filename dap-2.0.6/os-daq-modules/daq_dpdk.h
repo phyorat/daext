@@ -80,7 +80,9 @@
 
 typedef enum _DAQ_DPDK_MBUF_TYPE
 {
-    //MPOOL_PKT_TX = 0,
+#ifdef DAQ_DPDK_PKT_FORWARD
+    MPOOL_PKT_TX = 0,
+#endif
     MPOOL_PKT_RX,
     MPOOL_IPCRSEQ,
     DAQ_MPOOL_COUNT
@@ -141,6 +143,7 @@ typedef struct _dpdk_instance
     uint32_t flags;
     uint32_t port_mode;
     int port;
+    int fw_port;
     int index;
     int tx_start;
     int tx_end;
@@ -167,6 +170,7 @@ typedef struct _dpdk_context
     char *filter;
     uint8_t cfl_unity;
     uint8_t n_port;
+    uint8_t naf_port;
     uint16_t n_port_queue;
     uint64_t lcore_utilize_flag;
     DpdkInstance *instances[MAX_NIC_PORT_NUM];

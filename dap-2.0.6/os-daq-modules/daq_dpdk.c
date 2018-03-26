@@ -113,7 +113,9 @@ static const DAQ_Verdict verdict_translation_table[MAX_DAQ_VERDICT] = {
 
 daq_dpdk_mpool_collect dk_mbuf_coll [] =
 {
-        //{MPOOL_PKT_TX,          "MBUF_TX_POOL_S%dP%dQ%d",         NUM_MBUFS, RTE_MBUF_DEFAULT_BUF_SIZE, MBUF_CACHE_SIZE, 0},
+#ifdef DAQ_DPDK_PKT_FORWARD
+        {MPOOL_PKT_TX,       MR_ALL_QUEUES, "MPOOL_PKT_TX_S%dP%dQ%d",           NUM_MBUFS, RTE_MBUF_DEFAULT_BUF_SIZE, MBUF_CACHE_SIZE, 0, DAQ_DPDK_INN, 0},
+#endif
         {MPOOL_PKT_RX,       MR_ALL_QUEUES, "MPOOL_PKT_RX_S%dP%dQ%d",           NUM_MBUFS, RTE_MBUF_DEFAULT_BUF_SIZE, MBUF_CACHE_SIZE, 0, DAQ_DPDK_INN, 0},
         {MPOOL_IPCRSEQ,      MR_ALL_QUEUES, "MPOOL_IPCRSEQ_S%dP%dQ%d",
                 DAQ_DPDK_RING_MSG_POOL_SIZE, DAQ_DPDK_RING_MSG_DATA_LEN, DAQ_DPDK_RING_MSG_POOL_CACHE, 0, DAQ_DPDK_INN, 0},
@@ -352,8 +354,11 @@ static int parse_interface(const DAQ_Config_t *config, Dpdk_Context_t *dpdkc, ch
 
             /*instance->next = dpdkc->instances;
             dpdkc->instances = instance;*/
-            dpdkc->instances[dpdkc->n_port] = instance;
-            dpdkc->n_port++;
+            dpdkc->instances[dpdkc->naf_port] = instance;
+            if ( (instance->fw_port<0) || !(config->flags&DAQ_CFG_MINERVA) )
+                dpdkc->n_port++;
+            dpdkc->naf_port++;
+
             /*num_intfs++;
             if (config->mode != DAQ_MODE_PASSIVE) {
                 if (num_intfs == 2) {
@@ -417,7 +422,7 @@ static void destroy_instance(Dpdk_Context_t *dpdkc)
     int i;
     DpdkInstance *instance;
 
-    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++ ) {
+    for ( p_idx=0; p_idx<dpdkc->naf_port; p_idx++ ) {
         instance = dpdkc->instances[p_idx];
         if (instance) {
             if (instance->flags & DPDKINST_STARTED) {
@@ -483,6 +488,8 @@ static DpdkInstance *create_instance(Dpdk_Context_t *dpdkc, const char *device, 
     instance->index = index;
     index++;
 
+    instance->fw_port = -1;
+
     //port
     p_intf = device;
     if ( !memcmp(p_intf, "psi", 3) ) {
@@ -492,6 +499,18 @@ static DpdkInstance *create_instance(Dpdk_Context_t *dpdkc, const char *device, 
             snprintf(errbuf, errlen, "%s: Invalid interface specification: '%s'!", __FUNCTION__, device);
             goto err;
         }
+
+        p_intf += 1;
+    }
+    else if ( !memcmp(p_intf, "psd", 3) ) {
+        p_intf += 3;
+        port = *p_intf - '0';
+        if ( port >= MAX_NIC_PORT_NUM ) {
+            snprintf(errbuf, errlen, "%s: Invalid interface specification: '%s'!", __FUNCTION__, device);
+            goto err;
+        }
+
+        instance->fw_port = port;
 
         p_intf += 1;
     }
@@ -522,6 +541,16 @@ static DpdkInstance *create_instance(Dpdk_Context_t *dpdkc, const char *device, 
         q_step = 1;
     }
 
+    p_intf++;
+    if ( (intf_len>=10) && ('&' == *p_intf) ) {
+        p_intf += 1;
+        instance->fw_port = atoi(p_intf);
+        if ( instance->fw_port >= MAX_NIC_PORT_NUM ) {
+            snprintf(errbuf, errlen, "%s: Invalid interface port(fw) : %d!", __FUNCTION__, instance->fw_port);
+            goto err;
+        }
+    }
+
     printf("%s: Use Rx Queue %d on Port %d, Total %d...\n", __FUNCTION__, queue, port, queue_cnt);
 
     instance->port = port;
@@ -539,21 +568,19 @@ static DpdkInstance *create_instance(Dpdk_Context_t *dpdkc, const char *device, 
     if (  0 == instance->index ) {
         dpdkc->rx_ins = instance;
     }
-    else {
-/*        instance->rx_queue_s = 0;
+    else if ( instance->fw_port >=0 ) { //minerva
+        /*instance->rx_queue_s = 0;
         instance->rx_queue_e = 0;
         instance->rx_queue_h = 0;
-        instance->n_rx_queue = 0;
+        instance->n_rx_queue = 0;*/
 
         instance->tx_queue_s = queue;
-        instance->tx_queue_e = queue+q_step;
-        instance->tx_queue_h = q_step;
+        instance->tx_queue_e = queue+queue_cnt;
+        instance->tx_queue_h = queue_cnt;
         instance->n_tx_queue = queue_cnt;
 
         instance->port_mode = DPDK_PORT_TX;
-        Send_Instance = instance;
-
-        return instance;*/
+        //Send_Instance = instance;
     }
 
     instance->tid = pthread_self();
@@ -724,7 +751,7 @@ static int mpool_lcore_scroll(Dpdk_Context_t *dpdkc, daq_dpdk_mpool_collect *dmc
     switch ( dmcoll->attri ) {
     case MR_ALL_QUEUES:
     case MR_GENERAL:
-        for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++) {//= dpdkc->instances; instance; instance = instance->next) {
+        for ( p_idx=0; p_idx<dpdkc->naf_port; p_idx++) {//= dpdkc->instances; instance; instance = instance->next) {
             instance = dpdkc->instances[p_idx];
             for (q_idx=0; q_idx<instance->n_rx_queue; q_idx++) {
                 if_pkt_mp = 0;
@@ -734,6 +761,8 @@ static int mpool_lcore_scroll(Dpdk_Context_t *dpdkc, daq_dpdk_mpool_collect *dmc
                         if_pkt_mp = 1;
                 }
                 else {
+                    if ( instance->fw_port >=0 )
+                        continue;
                     dst_mpool = &instance->ap_mpools[dmcoll->type][q_idx];
                 }
 
@@ -1440,6 +1469,7 @@ static int start_instance(Dpdk_Context_t *dpdkc, DpdkInstance *instance)
         ret = rte_eth_tx_queue_setup(port, queue, TX_RING_SIZE,
                 rte_eth_dev_socket_id(port),
                 NULL);
+        DAQ_RTE_LOG("%s: setup tx port %u queue %u\n", __func__, port, queue);
         if (ret != 0) {
             DPE(dpdkc->errbuf, "%s: Couldn't setup tx queue %d for port %d\n", __FUNCTION__, queue, port);
             return DAQ_ERROR;
@@ -1566,7 +1596,7 @@ static int dpdk_daq_initialize(const DAQ_Config_t *config, void **ctxt_ptr, char
     unsigned di_lcore_id;
     int argc;
     //char argv0[] = "daq";
-    char dpdk_args_cap[64];
+    char dpdk_args_cap[512];
 
     //RTE LOG LEVEL
     if ( config->flags & DAQ_CFG_SYSLOG ) {
@@ -1649,6 +1679,8 @@ static int dpdk_daq_initialize(const DAQ_Config_t *config, void **ctxt_ptr, char
         goto err;
     }
 
+    DAQ_RTE_LOG("%s: data-plane port count %u\n", __func__, ports);
+
     if (dpdkc->intf_count > ports) {
         snprintf(errbuf, errlen, "%s: Using more than %d interfaces is not valid!",
                  __FUNCTION__, ports);
@@ -1716,7 +1748,11 @@ static int dpdk_daq_initialize(const DAQ_Config_t *config, void **ctxt_ptr, char
 
     //RTE LOG LEVEL
     if ( config->flags & DAQ_CFG_SYSLOG ) {
-    	rte_set_log_level(RTE_LOG_NOTICE);
+#ifdef BUILD_DPDK_VER_17111
+        rte_log_set_global_level(RTE_LOG_NOTICE);
+#else
+        rte_set_log_level(RTE_LOG_NOTICE);
+#endif
     }
 
     //DPDK mbuf initialize
@@ -2232,7 +2268,7 @@ static int dpdk_daq_start(void *handle)
     }
 
     //for (instance = dpdkc->instances; instance; instance = instance->next) {
-    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++ ) {
+    for ( p_idx=0; p_idx<dpdkc->naf_port; p_idx++ ) {
         instance = dpdkc->instances[p_idx];
         if (start_instance(dpdkc, instance) != DAQ_SUCCESS)
             return DAQ_ERROR;
@@ -2340,22 +2376,24 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
 {
     Dpdk_Context_t *dpdkc = (Dpdk_Context_t *) handle;
     DpdkInstance *instance;
-    EtherHdr *eh_hdr;
     DAQ_Verdict verdict;
     const uint8_t *data;
-    uint8_t ether_dst[6] = {0xc8, 0x1f, 0x66, 0xdb, 0xcb, 0xd8};
     uint16_t len;
     int c = 0;//, burst_size;
     int i;
 #ifdef DAQ_DPDK_PKT_FORWARD
-    int ret;
+//    int ret;
+//    uint8_t ether_dst[6] = {0xc8, 0x1f, 0x66, 0xdb, 0xcb, 0xd8};
+//    EtherHdr *eh_hdr;
+    struct rte_mbuf *m_send;
+    static uint64_t fw_cnt = 0;
+    uint16_t nb_tx;
 #endif
     uint32_t queue;
     struct timeval ts;
 #ifdef RX_CNT_TRACK
     static uint64_t queue_cnt = 0;
     static uint64_t show_cnt = 0;
-    static uint64_t fw_cnt = 0;
     struct rte_eth_link rte_link;
 #endif
 
@@ -2367,8 +2405,6 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
 //    while (c < cnt || cnt <= 0)
     {
         struct rte_mbuf *bufs[BURST_SIZE];
-//        struct rte_mbuf *m_send;
-//        uint16_t nb_tx;
 
         //for (instance = dpdkc->instances; instance; instance = instance->next) {
         instance = dpdkc->rx_ins;
@@ -2471,36 +2507,49 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                     dpdkc->stats.packets_received++;
                     c++;
 
+#ifdef DAQ_DPDK_PKT_FORWARD
                     //dst_mac:c8:1f:66:db:cb:d8
-                    if ( unlikely(NULL != Send_Instance) ) {
-                        eh_hdr = (EtherHdr *)data;
+                    //if ( unlikely(NULL != Send_Instance) ) {
+                    if ( unlikely(instance->fw_port >= 0) ) {
+                        /*eh_hdr = (EtherHdr *)data;
                         if ( memcmp(eh_hdr->ether_dst, ether_dst, 6) ) {
-                        /*    m_send = rte_pktmbuf_alloc(Send_Instance->mbuf_pool);
+                            printf("%s: try allocate memory for packet.\n",
+                                    __FUNCTION__);
+                            m_send = rte_pktmbuf_alloc(dpdkc->daq_mpool[MPOOL_PKT_TX]);
                             if (!m_send) {
-                                printf("%s: Couldn't allocate memory for packet.",
+                                printf("%s: Couldn't allocate memory for packet.\n",
                                         __FUNCTION__);
                             }
                             else {
+                                printf("%s: Could allocate memory for packet.\n",
+                                        __FUNCTION__);
                                 rte_memcpy(rte_pktmbuf_mtod(m_send, void *), data, len);
                                 m_send->pkt_len  = len;
                                 m_send->data_len = len;
-                                nb_tx = rte_eth_tx_burst(Send_Instance->port, 0, &m_send, 1);
+                                nb_tx = rte_eth_tx_burst(instance->fw_port, 0, &m_send, 1);
                                 if (unlikely(nb_tx == 0)) {
-                                    printf("%s: Couldn't send packet. Try again.", __FUNCTION__);
+                                    printf("%s: Couldn't send packet. Try again.\n", __FUNCTION__);
                                     rte_pktmbuf_free(m_send);
                                 }
-                                fw_cnt++;
+                                else {
+                                    fw_cnt++;
+                                    printf("%s: dirty pkt, fw_port %u, fw_cnt %"PRIu64"\n", __func__, instance->fw_port, fw_cnt);
+                                }
                             }*/
 
-                            //printf("%s: dirty pkt, fw_cnt %"PRIu64"\n", __func__, ++fw_cnt);
-                            rte_eth_tx_burst(Send_Instance->port, 0, &bufs[i], 1);
-                        }
+                            fw_cnt++;
+                            //if ( 0xffff == (fw_cnt & 0xffff) )
+                                printf("%s: dirty pkt, fw_port %u, fw_cnt %"PRIu64"\n", __func__, instance->fw_port, fw_cnt);
+                            //rte_eth_tx_burst(Send_Instance->port, 0, &bufs[i], 1);
+                            nb_tx = rte_eth_tx_burst(instance->fw_port, 0, &bufs[i], 1);
+                            if (unlikely(nb_tx == 0)) {
+                                printf("%s: Couldn't send packet. Try again.", __FUNCTION__);
+                                rte_pktmbuf_free(bufs[i]);
+                            }
+                        //}
                     }
 
-#ifndef DAQ_DPDK_PKT_FORWARD
-                    rte_pktmbuf_free(bufs[i]);
-#else
-                    ret = rte_ring_enqueue(instance->msg_ring_pkt_forw, bufs[i]);
+/*                    ret = rte_ring_enqueue(instance->msg_ring_pkt_forw, bufs[i]);
                     if ( -ENOBUFS == ret ) {
                         DAQ_RTE_LOG_DEEP("%s: Ring full for pkt-mbuf in queue[%d] process\n", __func__,
                                 instance->rx_queue_s);
@@ -2510,7 +2559,9 @@ static int dpdk_daq_acquire(void *handle, int cnt, DAQ_Analysis_Func_t callback,
                         DAQ_RTE_LOG("%s: Quota exceeded pkt-mbuf in queue[%d] process\n", __func__,
                                 instance->rx_queue_s);
                         rte_pktmbuf_free(bufs[i]);
-                    }
+                    }*/
+#else
+                    rte_pktmbuf_free(bufs[i]);
 #endif
                 }
             }
@@ -2555,7 +2606,7 @@ static int dpdk_daq_inject(void *handle, const DAQ_PktHdr_t *hdr, const uint8_t 
 
     /* Find the instance that the packet was received on. */
     //for (instance = dpdkc->instances; instance; instance = instance->next)
-    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++ )
+    for ( p_idx=0; p_idx<dpdkc->naf_port; p_idx++ )
     {
         if (dpdkc->instances[p_idx]->index == hdr->ingress_index) {
             instance = dpdkc->instances[p_idx];
@@ -2702,7 +2753,7 @@ static int dpdk_daq_get_device_index(void *handle, const char *device)
         return DAQ_ERROR_NODEV;
 
     //for (instance = dpdkc->instances; instance; instance = instance->next)
-    for ( p_idx=0; p_idx<dpdkc->n_port; p_idx++ )
+    for ( p_idx=0; p_idx<dpdkc->naf_port; p_idx++ )
     {
         instance = dpdkc->instances[p_idx];
         if (instance->port == port)
